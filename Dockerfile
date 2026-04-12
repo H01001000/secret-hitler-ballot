@@ -32,6 +32,9 @@ COPY --chown=node:node --from=builder /app/src ./src
 COPY --chown=node:node --from=builder /app/next.config.ts ./next.config.ts
 COPY --chown=node:node --from=builder /app/tsconfig.json ./tsconfig.json
 
+# Yarn may create `.yarn` under the project at runtime; WORKDIR /app is root-owned otherwise.
+RUN chown -R node:node /app
+
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
