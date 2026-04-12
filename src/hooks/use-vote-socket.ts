@@ -10,6 +10,19 @@ export type VoteSocketStatus =
   | "open"
   | "error";
 
+const MAX_BACKOFF_MS = 30_000;
+const INITIAL_BACKOFF_MS = 1_000;
+
+function isSocketBusy(ws: WebSocket | null): boolean {
+  if (!ws) return false;
+  const rs = ws.readyState;
+  return (
+    rs === WebSocket.CONNECTING ||
+    rs === WebSocket.OPEN ||
+    rs === WebSocket.CLOSING
+  );
+}
+
 export function useVoteSocket() {
   const [status, setStatus] = useState<VoteSocketStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -22,81 +35,159 @@ export function useVoteSocket() {
   const [allVotesIn, setAllVotesIn] = useState(false);
   const [voterId, setVoterId] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const cancelledRef = useRef(false);
+  const intentionalCloseRef = useRef(false);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const attemptRef = useRef(0);
+  const isConnectingRef = useRef(false);
+
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
+    cancelledRef.current = false;
 
-    async function run() {
-      setStatus("session");
-      setError(null);
-      const res = await fetch("/api/vote/session", { credentials: "include" });
-      if (!res.ok) {
-        setError("Could not create voter session.");
-        setStatus("error");
-        return;
-      }
-      const data = (await res.json()) as { voterId: string };
-      if (cancelled) return;
-      setVoterId(data.voterId);
-
-      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${proto}//${window.location.host}/api/vote/ws`;
-      setStatus("connecting");
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        if (cancelled) return;
-        setStatus("open");
-        setError(null);
-      };
-
-      ws.onmessage = (ev) => {
-        let msg: ServerMessage;
-        try {
-          msg = JSON.parse(String(ev.data)) as ServerMessage;
-        } catch {
-          return;
-        }
-        if (msg.type === "state") {
-          setElectionId(msg.electionId);
-          setYes(msg.yes);
-          setNo(msg.no);
-          setYourVote(msg.yourVote);
-          setConnectedCount(msg.connectedCount);
-          setVotesReceived(msg.votesReceived);
-          setAllVotesIn(msg.allVotesIn);
-        } else if (msg.type === "new_vote") {
-          setElectionId(msg.electionId);
-          setYes(0);
-          setNo(0);
-          setYourVote(null);
-          setVotesReceived(0);
-          setAllVotesIn(false);
-        }
-      };
-
-      ws.onerror = () => {
-        if (cancelled) return;
-        setError("WebSocket error.");
-        setStatus("error");
-      };
-
-      ws.onclose = () => {
-        if (cancelled) return;
-        setStatus("error");
-        setError((prev) => prev ?? "Disconnected.");
-      };
+    function scheduleReconnect() {
+      clearReconnectTimer();
+      const delay = Math.min(
+        INITIAL_BACKOFF_MS * 2 ** attemptRef.current,
+        MAX_BACKOFF_MS,
+      );
+      attemptRef.current += 1;
+      reconnectTimerRef.current = setTimeout(() => {
+        reconnectTimerRef.current = null;
+        void connect();
+      }, delay);
     }
 
-    void run();
+    async function connect() {
+      if (cancelledRef.current) return;
+      if (isConnectingRef.current) return;
+
+      const existing = wsRef.current;
+      if (isSocketBusy(existing)) return;
+      if (existing?.readyState === WebSocket.CLOSED) {
+        wsRef.current = null;
+      }
+
+      isConnectingRef.current = true;
+      setStatus("session");
+      setError(null);
+
+      try {
+        const res = await fetch("/api/vote/session", { credentials: "include" });
+        if (cancelledRef.current) return;
+        if (!res.ok) {
+          isConnectingRef.current = false;
+          setError("Could not create voter session.");
+          setStatus("error");
+          scheduleReconnect();
+          return;
+        }
+        const data = (await res.json()) as { voterId: string };
+        if (cancelledRef.current) return;
+        setVoterId(data.voterId);
+
+        const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const wsUrl = `${proto}//${window.location.host}/api/vote/ws`;
+        setStatus("connecting");
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          if (cancelledRef.current) return;
+          isConnectingRef.current = false;
+          attemptRef.current = 0;
+          clearReconnectTimer();
+          setStatus("open");
+          setError(null);
+        };
+
+        ws.onmessage = (ev) => {
+          let msg: ServerMessage;
+          try {
+            msg = JSON.parse(String(ev.data)) as ServerMessage;
+          } catch {
+            return;
+          }
+          if (msg.type === "state") {
+            setElectionId(msg.electionId);
+            setYes(msg.yes);
+            setNo(msg.no);
+            setYourVote(msg.yourVote);
+            setConnectedCount(msg.connectedCount);
+            setVotesReceived(msg.votesReceived);
+            setAllVotesIn(msg.allVotesIn);
+          } else if (msg.type === "new_vote") {
+            setElectionId(msg.electionId);
+            setYes(0);
+            setNo(0);
+            setYourVote(null);
+            setVotesReceived(0);
+            setAllVotesIn(false);
+          }
+        };
+
+        // iOS Safari often fires onerror before onclose; avoid sticky error UI here.
+        ws.onerror = () => {};
+
+        ws.onclose = () => {
+          isConnectingRef.current = false;
+          if (wsRef.current === ws) wsRef.current = null;
+          if (cancelledRef.current) return;
+          if (intentionalCloseRef.current) {
+            intentionalCloseRef.current = false;
+            return;
+          }
+          setStatus("connecting");
+          setError(null);
+          scheduleReconnect();
+        };
+      } catch {
+        isConnectingRef.current = false;
+        if (!cancelledRef.current) {
+          setError("Connection failed.");
+          setStatus("error");
+          scheduleReconnect();
+        }
+      }
+    }
+
+    void connect();
+
+    const onOnline = () => {
+      if (cancelledRef.current) return;
+      attemptRef.current = 0;
+      clearReconnectTimer();
+      const w = wsRef.current;
+      if (!w || w.readyState !== WebSocket.OPEN) void connect();
+    };
+
+    const onVisible = () => {
+      if (cancelledRef.current || document.visibilityState !== "visible") return;
+      attemptRef.current = 0;
+      clearReconnectTimer();
+      const w = wsRef.current;
+      if (!w || w.readyState !== WebSocket.OPEN) void connect();
+    };
+
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
+      clearReconnectTimer();
+      intentionalCloseRef.current = true;
       wsRef.current?.close();
       wsRef.current = null;
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisible);
     };
-  }, []);
+  }, [clearReconnectTimer]);
 
   const sendVote = useCallback((vote: VoteChoice) => {
     const ws = wsRef.current;
