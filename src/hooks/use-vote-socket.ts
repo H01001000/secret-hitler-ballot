@@ -31,6 +31,7 @@ export function useVoteSocket() {
   const [no, setNo] = useState(0);
   const [yourVote, setYourVote] = useState<VoteChoice | null>(null);
   const [connectedCount, setConnectedCount] = useState(0);
+  const [expectedPlayers, setExpectedPlayers] = useState(2);
   const [votesReceived, setVotesReceived] = useState(0);
   const [allVotesIn, setAllVotesIn] = useState(false);
   const [voterId, setVoterId] = useState<string | null>(null);
@@ -119,6 +120,7 @@ export function useVoteSocket() {
             setYes(msg.yes);
             setNo(msg.no);
             setYourVote(msg.yourVote);
+            setExpectedPlayers(msg.expectedPlayers);
             setConnectedCount(msg.connectedCount);
             setVotesReceived(msg.votesReceived);
             setAllVotesIn(msg.allVotesIn);
@@ -201,6 +203,12 @@ export function useVoteSocket() {
     ws.send(JSON.stringify({ type: "new_vote" }));
   }, []);
 
+  const setExpectedPlayersCount = useCallback((count: number) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: "set_expected_players", count }));
+  }, []);
+
   return {
     status,
     error,
@@ -209,10 +217,12 @@ export function useVoteSocket() {
     yes,
     no,
     yourVote,
+    expectedPlayers,
     connectedCount,
     votesReceived,
     allVotesIn,
     sendVote,
     startNewVote,
+    setExpectedPlayersCount,
   };
 }

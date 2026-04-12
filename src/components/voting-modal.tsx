@@ -6,6 +6,8 @@ import { useEffect, useRef, useState } from "react";
 import { useVoteSocket } from "@/hooks/use-vote-socket";
 import type { VoteChoice } from "@/types/vote";
 
+const PLAYER_COUNT_OPTIONS = [2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
+
 const germania = Germania_One({
   weight: "400",
   subsets: ["latin"],
@@ -25,11 +27,13 @@ export function VotingModal({ showRestartButton = true }: VotingModalProps) {
     yes,
     no,
     yourVote,
+    expectedPlayers,
     connectedCount,
     votesReceived,
     allVotesIn,
     sendVote,
     startNewVote,
+    setExpectedPlayersCount,
   } = useVoteSocket();
 
   const [vote, setVote] = useState<VoteChoice | null>(null);
@@ -70,6 +74,9 @@ export function VotingModal({ showRestartButton = true }: VotingModalProps) {
   const isBusy =
     status === "idle" || status === "session" || status === "connecting";
 
+  const everyoneVoted = connectedCount > 0 && votesReceived === connectedCount;
+  const expectedMet = connectedCount === expectedPlayers;
+
   const onConfirm = () => {
     if (!voteToSend) return;
     sendVote(voteToSend);
@@ -107,12 +114,34 @@ export function VotingModal({ showRestartButton = true }: VotingModalProps) {
       </div>
 
       {screen === "vote" && status === "open" ? (
-        <p className="mb-5 text-center text-sm text-zinc-400">
-          <span className="font-semibold tabular-nums text-zinc-200">
-            {connectedCount}
-          </span>{" "}
-          {connectedCount === 1 ? "client" : "clients"} connected
-        </p>
+        <div className="mb-5 space-y-3">
+          <label className="grid gap-1.5 text-xs text-zinc-500">
+            <span className="text-[11px] font-medium uppercase tracking-wide">
+              Players in game
+            </span>
+            <select
+              value={expectedPlayers}
+              onChange={(e) => setExpectedPlayersCount(Number(e.target.value))}
+              className="w-full rounded-md border border-zinc-600 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500/80"
+            >
+              {PLAYER_COUNT_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="text-center text-sm text-zinc-400">
+            <span className="font-semibold tabular-nums text-zinc-200">
+              {connectedCount}
+            </span>
+            <span className="text-zinc-600"> / </span>
+            <span className="tabular-nums text-zinc-400">
+              {expectedPlayers}
+            </span>
+            <span className="text-zinc-500"> connected</span>
+          </p>
+        </div>
       ) : null}
 
       {error ? (
@@ -181,9 +210,19 @@ export function VotingModal({ showRestartButton = true }: VotingModalProps) {
       ) : (
         <>
           <p className="mb-6 text-center text-sm text-zinc-400">
-            {allVotesIn
-              ? "Everyone has voted. Full results are below."
-              : "Your vote is recorded. Totals stay hidden until everyone has voted."}
+            {allVotesIn ? (
+              "Everyone has voted. Full results are below."
+            ) : everyoneVoted && !expectedMet ? (
+              <>
+                All connected players have voted. Ja / Nein totals stay hidden
+                until connected clients match{" "}
+                <span className="text-zinc-300">Players in game</span> (
+                {expectedPlayers}). Use Restart to change that on the ballot
+                screen, or wait for more players to join.
+              </>
+            ) : (
+              "Your vote is recorded. Totals stay hidden until everyone has voted and the table size matches."
+            )}
           </p>
 
           <div className="mb-6 flex flex-col items-center gap-4 rounded-md border border-zinc-700/80 bg-zinc-900/50 px-4 py-6">
@@ -216,6 +255,13 @@ export function VotingModal({ showRestartButton = true }: VotingModalProps) {
                   <span className="tabular-nums text-zinc-200">{no}</span>
                 </p>
               </div>
+            ) : everyoneVoted && !expectedMet ? (
+              <p className="text-center text-sm text-amber-200/85">
+                Connected ({connectedCount}) ≠ players in game (
+                {expectedPlayers}
+                ). Restart to adjust Players in game, or wait for connections to
+                match.
+              </p>
             ) : (
               <p className="text-center text-sm italic text-zinc-500">
                 Waiting for remaining votes…

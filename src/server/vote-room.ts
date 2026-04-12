@@ -2,10 +2,14 @@ import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
 import type { ClientMessage, ServerMessage, VoteChoice } from "../types/vote";
 
+const MIN_EXPECTED_PLAYERS = 2;
+const MAX_EXPECTED_PLAYERS = 10;
+
 export class VoteRoom {
   private clients = new Map<WebSocket, string>();
   private electionId = randomUUID();
   private votes = new Map<string, VoteChoice>();
+  private expectedPlayers = MIN_EXPECTED_PLAYERS;
 
   addClient(ws: WebSocket, voterId: string) {
     this.clients.set(ws, voterId);
@@ -35,6 +39,21 @@ export class VoteRoom {
       return;
     }
 
+    if (msg.type === "set_expected_players") {
+      const n = msg.count;
+      if (
+        typeof n !== "number" ||
+        !Number.isInteger(n) ||
+        n < MIN_EXPECTED_PLAYERS ||
+        n > MAX_EXPECTED_PLAYERS
+      ) {
+        return;
+      }
+      this.expectedPlayers = n;
+      this.broadcastState();
+      return;
+    }
+
     if (msg.type === "new_vote") {
       this.electionId = randomUUID();
       this.votes.clear();
@@ -52,7 +71,11 @@ export class VoteRoom {
       if (this.votes.has(id)) votesReceived++;
     }
 
-    const allVotesIn = connectedCount > 0 && votesReceived === connectedCount;
+    const everyoneVoted =
+      connectedCount > 0 && votesReceived === connectedCount;
+    const expectedMet = connectedCount === this.expectedPlayers;
+    /** Full Ja/Nein totals only when table size matches selection and every connected client has voted. */
+    const allVotesIn = everyoneVoted && expectedMet;
 
     let yes = 0;
     let no = 0;
@@ -70,6 +93,7 @@ export class VoteRoom {
       yes,
       no,
       yourVote: this.votes.get(voterId) ?? null,
+      expectedPlayers: this.expectedPlayers,
       connectedCount,
       votesReceived,
       allVotesIn,
