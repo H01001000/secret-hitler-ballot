@@ -106,6 +106,15 @@ export function VotingModal({ showRestartButton = true }: VotingModalProps) {
         ) : null}
       </div>
 
+      {screen === "vote" && status === "open" ? (
+        <p className="mb-5 text-center text-sm text-zinc-400">
+          <span className="font-semibold tabular-nums text-zinc-200">
+            {connectedCount}
+          </span>{" "}
+          {connectedCount === 1 ? "client" : "clients"} connected
+        </p>
+      ) : null}
+
       {error ? (
         <p className="mb-4 rounded-md border border-red-900/60 bg-red-950/40 px-3 py-2 text-sm text-red-200">
           {error}
