@@ -23,6 +23,16 @@ function isSocketBusy(ws: WebSocket | null): boolean {
   );
 }
 
+/** Dev: vote WS is on VOTE_WS_PORT (default 3001). Prod: same host as the page. */
+function voteWebSocketUrl(): string {
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  if (process.env.NODE_ENV === "development") {
+    const p = process.env.NEXT_PUBLIC_VOTE_WS_PORT ?? "3001";
+    return `${proto}//${window.location.hostname}:${p}/api/vote/ws`;
+  }
+  return `${proto}//${window.location.host}/api/vote/ws`;
+}
+
 export function useVoteSocket() {
   const [status, setStatus] = useState<VoteSocketStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -80,7 +90,9 @@ export function useVoteSocket() {
       setError(null);
 
       try {
-        const res = await fetch("/api/vote/session", { credentials: "include" });
+        const res = await fetch("/api/vote/session", {
+          credentials: "include",
+        });
         if (cancelledRef.current) return;
         if (!res.ok) {
           isConnectingRef.current = false;
@@ -93,8 +105,7 @@ export function useVoteSocket() {
         if (cancelledRef.current) return;
         setVoterId(data.voterId);
 
-        const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const wsUrl = `${proto}//${window.location.host}/api/vote/ws`;
+        const wsUrl = voteWebSocketUrl();
         setStatus("connecting");
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
@@ -170,7 +181,8 @@ export function useVoteSocket() {
     };
 
     const onVisible = () => {
-      if (cancelledRef.current || document.visibilityState !== "visible") return;
+      if (cancelledRef.current || document.visibilityState !== "visible")
+        return;
       attemptRef.current = 0;
       clearReconnectTimer();
       const w = wsRef.current;
