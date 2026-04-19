@@ -1,36 +1,67 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Secret Hitler Ballot
 
-## Getting Started
+Small web app for **live Ja / Nein government votes** around the table. Each player opens the same page on their phone; votes stay private until everyone has voted and the headcount matches the table size you set.
 
-First, run the development server:
+Built with **Next.js** (App Router), a **custom Node server** (`server.ts`) that serves the app and a **`ws`** vote room, **Tailwind CSS**, and **Biome** for lint/format.
+
+> *Secret Hitler* is a trademark of Goat Wolf & Cactus LLC. This project is an unofficial helper and is not affiliated with or endorsed by the publisher.
+
+## Features
+
+- **Ja / Nein** ballot UI with per-device voter identity (`voter_id` httpOnly cookie from `/api/vote/session`).
+- **WebSocket** sync (`/api/vote/ws`): connected count, progress, and full tallies only when every connected client has voted **and** `connected ===` “Players in game” (2–10).
+- **New election** (Restart) clears votes for everyone on the socket.
+- **Dev**: vote WebSocket defaults to port **3001** so port **3000** stays clean for Next HMR; production uses a single HTTP server and upgrade routing.
+
+## Requirements
+
+- Node.js 20+ (recommended)
+- [Yarn](https://yarnpkg.com/) 4 (`packageManager` is pinned in `package.json`)
+
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+yarn install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Development
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+yarn dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- App: [http://localhost:3000](http://localhost:3000) (or `http://$HOST:3000` if you set `HOST`)
+- Vote WebSocket (default): `ws://localhost:3001/api/vote/ws`
 
-## Learn More
+Override ports with:
 
-To learn more about Next.js, take a look at the following resources:
+| Variable | Purpose |
+|----------|---------|
+| `HOST` | Bind host in dev (default `localhost`) |
+| `PORT` | HTTP port (default `3000`) |
+| `VOTE_WS_PORT` | Vote WS port in dev only (default `3001`; must match `next.config.ts` / `NEXT_PUBLIC_VOTE_WS_PORT`) |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Production
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+yarn build
+yarn start
+```
 
-## Deploy on Vercel
+`yarn start` runs `NODE_ENV=production tsx server.ts`. In production the server listens on **`0.0.0.0`** by default (override with `PORT` as needed for your host/container).
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Scripts
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Command | Description |
+|---------|-------------|
+| `yarn dev` | Custom server + Next in development |
+| `yarn build` | Next production build |
+| `yarn start` | Production server |
+| `yarn lint` | `biome check` |
+| `yarn format` | `biome format --write` |
+
+## How it works (brief)
+
+1. The client calls **`GET /api/vote/session`** to ensure a `voter_id` cookie exists.
+2. The browser opens **`WebSocket`** to `/api/vote/ws`; the server checks the cookie on upgrade and attaches the socket to a shared **`VoteRoom`** (`src/server/vote-room.ts`).
+3. JSON messages match **`src/types/vote.ts`** (`vote`, `new_vote`, `set_expected_players` from clients; `state` / `new_vote` from server).
