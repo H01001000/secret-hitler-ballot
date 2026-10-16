@@ -33,7 +33,7 @@ COPY --chown=node:node --from=builder /app/next.config.ts ./next.config.ts
 COPY --chown=node:node --from=builder /app/tsconfig.json ./tsconfig.json
 
 # Yarn may create `.yarn` under the project at runtime; WORKDIR /app is root-owned otherwise.
-RUN chown -R node:node /app
+RUN chown node:node /app
 
 USER node
 EXPOSE 3000
